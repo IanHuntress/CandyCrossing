@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<title>Definitely not copyright infringement Land</title>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+	<link rel=stylesheet href="css/base.css"/>
+</head>
+<body>
+
+<script src="./js/Three.js"></script>
+<script src="./js/Detector.js"></script>
+<script src="./js/Stats.js"></script>
+<script src="./js/OrbitControls.js"></script>
+<script src="./js/THREEx.KeyboardState.js"></script>
+<script src="./js/THREEx.FullScreen.js"></script>
+<script src="./js/THREEx.WindowResize.js"></script>
+<script src="https://cdn.socket.io/socket.io-1.4.5.js"></script>
+
+
+<!-- Simplfied gamepad interaction (Chrome 22 patched) -->
+<!-- <script src="js/gamepad.js"></script> --!>
+<!-- jQuery code to display an information button and box when clicked. -->
+<script src="js/jquery-1.9.1.js"></script>
+<script src="js/jquery-ui.js"></script>
+<link rel=stylesheet href="css/jquery-ui.css" />
+<link rel=stylesheet href="css/info.css"/>
+<script src="js/info.js"></script>
+<div id="infoButton"></div>
+<div id="infoBox" title="Demo Information">
+Controls:
+<ul>
+<li>Up arrow: forwards
+<li>Down arrow: backwards
+<li>Left arrow: turn left
+<li>Right arrow: turn right
+</ul>
+This three.js demo is part of a collection at
+<a href="http://stemkoski.github.io/Three.js/">http://stemkoski.github.io/Three.js/</a>
+</div>
+<!-- ------------------------------------------------------------ -->
+
+<div id="ThreeJS" style="position: absolute; left:0px; top:0px"></div>
+<script>
+/*
+	Three.js "tutorials by example"
+	Author: Lee Stemkoski
+	Date: July 2013 (three.js v59dev)
+*/
+
+// MAIN
+
+// standard global variables
+var container, scene, camera, renderer, controls, stats;
+var keyboard = new THREEx.KeyboardState();
+var clock = new THREE.Clock();
+
+
+
+// custom global variables
+var android;
+
+// the following code is from
+//    http://catchvar.com/threejs-animating-blender-models
+var animOffset       = 0,   // starting frame of animation
+	walking         = false,
+	duration        = 1000, // milliseconds to complete animation
+	keyframes       = 20,   // total number of animation frames
+	interpolation   = duration / keyframes, // milliseconds per frame
+	lastKeyframe    = 0,    // previous keyframe
+	currentKeyframe = 0,
+	CAMERAHEIGHT    = 150,
+    Width = 1392,
+    Height = 1264,
+    tackleOnCoolDown= false,
+    tackleDistance  = 2;
+    
+    
+init();
+animate();
+
+
+var Gamepad = navigator.getGamepads()[0];
+
+var selfId2 = "android2";
+var hunterControls = false;
+
+var canvas = document.createElement('canvas');
+canvas.width = 1392;
+canvas.height = 1264;
+var ctx = canvas.getContext('2d');
+var imageObj = new Image();
+
+imageObj.onload = function() {
+ctx.drawImage(imageObj, 0, 0);
+};
+//imageObj.src = 'images/KAKARIKOVILLAGE.png';
+imageObj.src = './images/KakarikoCollisions.png';
+
+function player(name,x ,y ,z , r,color) {//this also needs a model pointer, initialize? or does that not matter?
+    this.name = name;
+    this.x = x;
+    this.y = y;
+    this.z = z;
+    this.dx = 0;
+    this.dy = 0;
+    this.dz = 0;
+    this.yRotation = r;
+    this.color = color;
+}
+
+function getColorUnderfoot(x = android.position.x,y = android.position.z) {
+        //Y = (X-A)/(B-A) * (D-C) + C
+        var data;
+        if(ctx){
+        var xcoord = Math.floor((x + 500)/1000 * Width);
+        var ycoord = Math.floor((y + 500)/1000 * Height);
+        data = ctx.getImageData(xcoord,ycoord, 1, 1).data;//wtf linear transformation sucks for some reason
+        
+        var color = [data[0], data[1], data[2]];
+        //console.log("color at ("  + xcoord,ycoord + ") is " + color);
+        return color;
+        }
+}
+
+    var players = {};
+    var candies = {};
+    var socket;
+
+
+function websocketInit() {
+
+    socket = io.connect();
+    socket.on('NewPlayerJoined', function (data) {
+        console.log("user " + data.name + " connected");
+        //console.log(data);
+        //players = data.currentPlayers; //load all new players? //overwrites model pointers?
+        for(var key in data.currentPlayers){
+
+        
+                if(players[key] || socket.id == key.substring(2)){ //don't reload yourself
+                    //console.log("i already have player " + key);
+                } else {
+                    if(key != data.name){
+                    console.log("adding player " + key);
+                    addPlayerToScene(key);
+                    //console.log(players);
+                    }
+                    
+                }
+        }
+        //for(var key in players){console.log(players);console.log(key);console.log(players[key]);}// debug prints
+        
+    });
+
+
+    socket.on('PositionUpdate', function (data) {
+
+        for(var key in data){
+            if(players[key]){//problem writing over yourself
+                players[key].x = data[key].x;
+                players[key].y = data[key].y;
+                players[key].z = data[key].z;
+                players[key].yRotation = data[key].yRotation;
+            } else {
+                //addPlayerToScene(key);
+            }
+        }
+    });
+    
+    socket.on('SpawnCandy', function (data) {
+        //console.log("CANDY SPAWN " + data.name);
+        spawnCandy(data.name,data.x,data.y);
+
+    });
+    
+    socket.on('PlayerDied', function (data) {
+            //console.log("someone died: " + data.deadPlayerId);
+            //console.log("but my name is: " + socket.id);
+        if(data.deadPlayerId.substring(2) == socket.id){
+            console.log("i died");
+            android.position.set(0,0,-505);
+        }
+    });
+    
+    socket.on('PlayerQuit', function (data) {
+      console.log("player " + data.quitter + " quit");
+      if(players[data.quitter]){
+          scene.remove(players[data.quitter].modelPointer);
+          delete players[data.quitter];
+      }
+    });
+    
+    socket.on('EatCandy', function (data) {
+      //console.log("player " + data.candyKey + " quit");
+      if(candies[data.candyKey]){
+          scene.remove(candies[data.candyKey].modelPointer);
+          delete candies[data.candyKey];
+      }
+    });
+}
+// FUNCTIONS 	
+
+function spawnCandy(name,x,z) {
+        var sg = new THREE.SphereGeometry( 2, 32, 32 );
+        var sm = new THREE.MeshPhongMaterial( {color: 0xffff00} );
+        var sphere = new THREE.Mesh( sg, sm );
+        sphere.position.set(x,3,z);
+        candies[name] = new  player(name,x ,0 ,z , 2,"candy");
+        candies[name].modelPointer = sphere;
+        scene.add( sphere );
+}
+	
+function init() 
+{
+	// SCENE
+	scene = new THREE.Scene();
+	// CAMERA
+	var SCREEN_WIDTH = window.innerWidth, SCREEN_HEIGHT = window.innerHeight;
+    //var SCREEN_WIDTH = 50, SCREEN_HEIGHT = 50;
+	var VIEW_ANGLE = 45, ASPECT = SCREEN_WIDTH / SCREEN_HEIGHT, NEAR = 0.1, FAR = 20000;
+	camera = new THREE.PerspectiveCamera( VIEW_ANGLE, ASPECT, NEAR, FAR);
+	scene.add(camera);
+	camera.position.set(0,150,400);
+	//camera.lookAt(scene.position);	
+	// RENDERER
+	if ( Detector.webgl )
+		renderer = new THREE.WebGLRenderer( {antialias:true} );
+	else
+		renderer = new THREE.CanvasRenderer(); 
+	renderer.setSize(SCREEN_WIDTH, SCREEN_HEIGHT);
+	container = document.getElementById( 'ThreeJS' );
+	container.appendChild( renderer.domElement );
+	// EVENTS
+	THREEx.WindowResize(renderer, camera);
+	THREEx.FullScreen.bindKey({ charCode : 'm'.charCodeAt(0) });
+	// CONTROLS
+	//controls = new THREE.OrbitControls( camera, renderer.domElement );
+	// STATS
+	stats = new Stats();
+	stats.domElement.style.position = 'absolute';
+	stats.domElement.style.bottom = '0px';
+	stats.domElement.style.zIndex = 100;
+	container.appendChild( stats.domElement );
+	// LIGHT
+	var light = new THREE.PointLight(0xffffff);
+	light.position.set(-100,200,100);
+	scene.add(light);
+	// FLOOR
+	var floorTexture = new THREE.ImageUtils.loadTexture( 'images/KAKARIKOVILLAGE.png' );
+	//var floorTexture = new THREE.ImageUtils.loadTexture( 'images/kakarikoCollisions.png' );
+
+	var floorMaterial = new THREE.MeshBasicMaterial( { map: floorTexture, side: THREE.DoubleSide } );
+	var floorGeometry = new THREE.PlaneGeometry(1000, 1000, 10, 10);//hard coded collision areas is bad
+	var floor = new THREE.Mesh(floorGeometry, floorMaterial);
+	floor.position.y = -0.5;
+    floor.rotation.x = -Math.PI / 2;
+
+	scene.add(floor);
+	// SKYBOX/FOG
+	var skyBoxGeometry = new THREE.CubeGeometry( 10000, 10000, 10000 );
+	var skyBoxMaterial = new THREE.MeshBasicMaterial( { color: 0x9999ff, side: THREE.BackSide } );
+	var skyBox = new THREE.Mesh( skyBoxGeometry, skyBoxMaterial );
+	// scene.add(skyBox);
+	scene.fog = new THREE.FogExp2( 0x9999ff, 0.00025 );
+	
+	////////////
+	// CUSTOM //
+	////////////
+	
+	jsonLoader = new THREE.JSONLoader();
+	jsonLoader.load( "models/android-animations.js", addModelToScene );
+	// addModelToScene function is called back after model has loaded
+	
+	var ambientLight = new THREE.AmbientLight(0x111111);
+	scene.add(ambientLight);
+    
+    websocketInit()
+}
+
+var playerGeometry;
+var playerMaterial;
+
+function addModelToScene( geometry, materials ) 
+{
+	// for preparing animation
+	for (var i = 0; i < materials.length; i++)
+		materials[i].morphTargets = true;
+		
+	var material = new THREE.MeshFaceMaterial( materials );
+	android = new THREE.Mesh( geometry, material );
+    playerGeometry = geometry;
+    playerMaterial = material;
+	android.scale.set(1,1,1);
+	scene.add( android );
+}
+
+function addPlayerToScene(playerId) 
+{
+    players[playerId] = new player(playerId,0 ,0 ,0 ,0 ,"animals");
+    var newPlayer = new THREE.Mesh( playerGeometry, playerMaterial );
+    newPlayer.scale.set(1,1,1);
+    newPlayer.position.set(0,0,0);
+    //console.log("setting model pointer");
+    players[playerId].modelPointer = newPlayer;
+    scene.add( newPlayer );
+}
+
+function animate() 
+{
+    requestAnimationFrame( animate );
+	render();		
+	update();
+}
+
+function update()
+{
+    Gamepad = navigator.getGamepads()[0];
+	// delta = change in time since last call (seconds)
+	delta = clock.getDelta(); 
+	var moveDistance = 80 * delta;//to increase moveDistance, retest delta for tackle?
+	walking = false;
+
+	if (Gamepad && android) 
+	{
+        
+        // adjust for deadzone.
+        if (Math.abs(Gamepad.axes[0]) > 0.3)
+        {   
+            android.position.x += (moveDistance * (Gamepad.axes[0]) );
+            //android.translateX( moveDistance * (Gamepad.axes[0]) );
+            //android.rotation.y -= delta * (Gamepad.axes[0] + Gamepad.axes[2]);
+            walking = true;
+            var groundColor = getColorUnderfoot();
+            if((groundColor[0] == 255 && groundColor[1] == 0 && groundColor[2] == 255)){
+                android.position.x -= (moveDistance * (Gamepad.axes[0]) );
+                //android.translateX( -moveDistance * (Gamepad.axes[0]) );
+            }
+            
+        }
+        if (Math.abs(Gamepad.axes[1]) > 0.3)
+        {
+            android.position.z += (moveDistance * (Gamepad.axes[1]) );
+            //android.translateZ( moveDistance * (Gamepad.axes[1]) );
+            //android.rotation.y -= delta * (Gamepad.axes[0] + Gamepad.axes[2]);
+            walking = true;
+            var groundColor = getColorUnderfoot();
+            if((groundColor[0] == 255 && groundColor[1] == 0 && groundColor[2] == 255)){
+                android.position.z -= (moveDistance * (Gamepad.axes[1]) );
+                //android.translateZ( -moveDistance * (Gamepad.axes[1]) );
+            }
+            
+        }
+        if (Math.abs(Gamepad.axes[2]) > 0.3 && players[selfId2])
+        {   
+            players[selfId2].modelPointer.position.x += (moveDistance * (Gamepad.axes[2]) );
+            walking = true;
+            var groundColor = getColorUnderfoot(players[selfId2].modelPointer.position.x,players[selfId2].modelPointer.position.z);
+            if((groundColor[0] == 255 && groundColor[1] == 0 && groundColor[2] == 255)){
+                players[selfId2].modelPointer.position.x -= (moveDistance * (Gamepad.axes[2]) );
+            }
+            
+        }
+        if (Math.abs(Gamepad.axes[3]) > 0.3 && players[selfId2])
+        {
+            players[selfId2].modelPointer.position.z += (moveDistance * (Gamepad.axes[3]) );
+            walking = true;
+            var groundColor = getColorUnderfoot(players[selfId2].modelPointer.position.x,players[selfId2].modelPointer.position.z);
+            if((groundColor[0] == 255 && groundColor[1] == 0 && groundColor[2] == 255)){
+                players[selfId2].modelPointer.position.z -= (moveDistance * (Gamepad.axes[3]) );
+            }
+            
+        }
+	}
+	
+	// move forwards / backwards
+
+	if ( keyboard.pressed("down")){
+        android.translateZ(  -moveDistance );
+        var groundColor = getColorUnderfoot();
+        if((groundColor[0] == 255 && groundColor[1] == 0 && groundColor[2] == 255)){
+            android.translateZ(  moveDistance );
+        }
+    }
+	if ( keyboard.pressed("up")){
+        android.translateZ(  moveDistance );
+        var groundColor = getColorUnderfoot();
+        if((groundColor[0] == 255 && groundColor[1] == 0 && groundColor[2] == 255)){
+            android.translateZ(  -moveDistance );
+        }
+    }
+	// rotate left/right
+	if ( keyboard.pressed("left") )
+		android.rotation.y += delta+0.1;
+	if ( keyboard.pressed("right") )
+		android.rotation.y -= delta+0.1;
+	if ( keyboard.pressed("space") ){
+        socket.emit("debug",{x:android.position.x,y:android.position.z});
+                console.log(players);
+        if(tackleOnCoolDown == false){
+            moveDistance = moveDistance * 20;
+            tackleOnCoolDown = true;
+            setTimeout(function(){moveDistance= moveDistance/20;tackleOnCoolDown = false;}, 3000);
+        } else {
+            console.log("you are very tired");
+        }
+    }
+	if ( keyboard.pressed("t") ){
+        console.log("T is for team hunters");
+        initiateHunterControls();
+        socket.emit("TeamSwitch",{team:"hunters"});
+    }
+	
+	var walkingKeys = ["up", "down", "left", "right"];
+	for (var i = 0; i < walkingKeys.length; i++)
+	{
+		if ( keyboard.pressed(walkingKeys[i]) )
+			walking = true;
+	}
+    
+    
+    if(android && socket){
+        socket.emit("PlayerUpdate", {x:android.position.x, y:android.position.y,z:android.position.z, r:android.rotation.y});
+    }
+    
+	if(android && !hunterControls){
+	camera.position.x = android.position.x;
+	camera.position.y = android.position.y+CAMERAHEIGHT;
+	camera.position.z = android.position.z+CAMERAHEIGHT/2;
+    camera.lookAt( android.position );
+    } else if (players && players[selfId2]) {
+    
+	camera.position.x = (android.position.x + players[selfId2].modelPointer.position.x)/2;
+	camera.position.y = android.position.y+CAMERAHEIGHT + 
+                        Math.abs(android.position.x - players[selfId2].modelPointer.position.x +
+                        android.position.z - players[selfId2].modelPointer.position.z)/2;
+	camera.position.z = (android.position.z + players[selfId2].modelPointer.position.z)/2 + CAMERAHEIGHT/2;
+    camera.lookAt( new THREE.Vector3((android.position.x + players[selfId2].modelPointer.position.x)/2
+                                    ,(android.position.y + players[selfId2].modelPointer.position.y)/2
+                                    ,(android.position.z + players[selfId2].modelPointer.position.z)/2) );
+    }
+    
+    //update all player positions
+    //console.log(players);
+    //var counter = 0;
+    for(var key in players){
+        
+        if(players[key].modelPointer){
+            //console.log("x:" + players[key].x + ", y: " + players[key].y + ", z: " + players[key].z);
+            if(players[key] == players[selfId2]) {continue;}
+            players[key].modelPointer.position.x = players[key].x;
+            players[key].modelPointer.position.y = players[key].y;
+            players[key].modelPointer.position.z = players[key].z;
+            players[key].modelPointer.rotation.y = players[key].yRotation;
+            //counter++;
+        } else {
+
+        }
+            //console.log("numplayers: " + counter);
+    }
+
+	//camera.updateMatrix();
+	//camera.updateProjectionMatrix();
+    
+	//controls.update();
+	stats.update();
+}
+
+function initiateHunterControls(){
+
+    hunterControls = true;
+
+    
+    players[selfId2] = new player(selfId2,0 ,0 ,0 ,0 ,"hunters");
+    var newPlayer = new THREE.Mesh( playerGeometry, playerMaterial );
+    newPlayer.scale.set(1,1,1);
+    newPlayer.position.set(0,0,0);
+    players[selfId2].modelPointer = newPlayer;
+    scene.add( newPlayer );
+    
+}
+
+    
+function render() 
+{
+	if ( android && walking ) // exists / is loaded 
+	{
+		// Alternate morph targets
+		time = new Date().getTime() % duration;
+		keyframe = Math.floor( time / interpolation ) + animOffset;
+		if ( keyframe != currentKeyframe ) 
+		{
+			android.morphTargetInfluences[ lastKeyframe ] = 0;
+			android.morphTargetInfluences[ currentKeyframe ] = 1;
+			android.morphTargetInfluences[ keyframe ] = 0;
+			lastKeyframe = currentKeyframe;
+			currentKeyframe = keyframe;
+		}
+		android.morphTargetInfluences[ keyframe ] = 
+			( time % interpolation ) / interpolation;
+		android.morphTargetInfluences[ lastKeyframe ] = 
+			1 - android.morphTargetInfluences[ keyframe ];
+	}
+	
+	renderer.render( scene, camera );
+}
+
+
+</script>
+
+</body>
+</html>

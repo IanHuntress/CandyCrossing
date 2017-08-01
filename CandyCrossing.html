@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<title>Candy Crossing</title>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+	<link rel=stylesheet href="css/base.css"/>
+</head>
+<body>
+
+<script src="./js/Three.js"></script>
+<script src="./js/Detector.js"></script>
+<script src="./js/Stats.js"></script>
+<script src="./js/OrbitControls.js"></script>
+<script src="./js/THREEx.KeyboardState.js"></script>
+<script src="./js/THREEx.FullScreen.js"></script>
+<script src="./js/THREEx.WindowResize.js"></script>
+<script src="https://cdn.socket.io/socket.io-1.4.5.js"></script>
+
+
+<!-- Simplfied gamepad interaction (Chrome 22 patched) -->
+<!-- <script src="js/gamepad.js"></script> --!>
+<!-- jQuery code to display an information button and box when clicked. -->
+<script src="js/jquery-1.9.1.js"></script>
+<script src="js/jquery-ui.js"></script>
+<link rel=stylesheet href="css/jquery-ui.css" />
+<link rel=stylesheet href="css/info.css"/>
+<script src="js/info.js"></script>
+<div id="infoButton"></div>
+<div id="infoBox" title="Demo Information">
+Controls:
+<ul>
+<li>Up arrow: forwards
+<li>Down arrow: backwards
+<li>Left arrow: turn left
+<li>Right arrow: turn right
+</ul>
+This three.js demo is part of a collection at
+<a href="http://stemkoski.github.io/Three.js/">http://stemkoski.github.io/Three.js/</a>
+</div>
+<!-- ------------------------------------------------------------ -->
+<div id="ThreeJS" style="position: absolute; left:0px; top:0px"></div>
+<script src="./js/Main.js"></script>
+</body>
+</html>
